@@ -1,0 +1,73 @@
+#region imports
+from AlgorithmImports import *
+#endregion
+
+# Mean Reversion
+
+# ------------------------------------------------------------
+STOCK = "SPY"; PERIOD = 5; WAIT = 0; MULTIPLIER = 1
+# ------------------------------------------------------------
+
+class MeanReversion(QCAlgorithm):
+
+    def Initialize(self):
+        self.SetStartDate(2022, 6, 1)  
+        self.SetEndDate(2022, 6, 3)  
+        self.SetCash(100000) 
+        self.stock = self.AddEquity(STOCK, Resolution.Minute).Symbol
+        self.hh = self.MAX(self.stock, PERIOD, Resolution.Minute, Field.High)
+        self.ll = self.MIN(self.stock, PERIOD, Resolution.Minute, Field.Low)
+        self.SetWarmUp(PERIOD, Resolution.Minute)
+        self.openingrange_HH = 0
+        self.openingrange_LL = 0
+        self.tradeLimit = True
+        self.Schedule.On(self.DateRules.EveryDay(self.stock), self.TimeRules.AfterMarketOpen(self.stock, PERIOD), self.DailyCheck)
+
+        self.Schedule.On(self.DateRules.EveryDay(self.stock), self.TimeRules.BeforeMarketClose(self.stock, 5), self.Liquidate)
+
+    def DailyCheck(self):
+        if self.IsWarmingUp: return
+    
+        self.openingrange_HH = self.hh.Current.Value
+        self.openingrange_LL = self.ll.Current.Value
+        self.tradeLimit = True
+    
+    def OnData(self, data):
+        if self.IsWarmingUp: return
+        if (self.openingrange_HH == 0 or self.openingrange_LL == 0): return
+    
+        price = self.Securities[self.stock].Price
+        risk = self.Portfolio.TotalPortfolioValue / 10000
+        rangewidth = self.openingrange_HH - self.openingrange_LL
+        shareqty = Math.Round(risk / rangewidth)
+
+        if not self.Portfolio[self.stock].Invested and self.tradeLimit == True:
+            if price > self.openingrange_HH:
+                self.MarketOrder(STOCK, -shareqty, tag="Short entry")
+                self.Debug("Price: " + str(price) + " // High: " + str(self.openingrange_HH) + " // Low: " + str(self.openingrange_LL) + " // Width: " + str(rangewidth))
+                self.Debug("Short SL: " + str(self.openingrange_HH + rangewidth))
+                self.Debug("Short TP: " + str(self.openingrange_HH - (MULTIPLIER * rangewidth)))
+                self.tradeLimit = False
+                
+            if price < self.openingrange_LL:
+                self.MarketOrder(STOCK, shareqty, tag="Long entry")
+                self.Debug("Price: " + str(price) + " // High: " + str(self.openingrange_HH) + " // Low: " + str(self.openingrange_LL) + " // Width: " + str(rangewidth))
+                self.Debug("Long SL: " + str(self.openingrange_LL - rangewidth))
+                self.Debug("Long TP: " + str(self.openingrange_LL + (MULTIPLIER * rangewidth)))
+                self.tradeLimit = False
+
+        if self.Portfolio[self.stock].Invested and self.Portfolio[self.stock].Quantity > 0:
+            if price < (self.openingrange_LL - rangewidth):
+                self.Liquidate(tag = "Long SL")
+                
+            if price > (self.openingrange_LL + (MULTIPLIER * rangewidth)):
+                self.Liquidate(tag = "Long TP")
+                
+
+        if self.Portfolio[self.stock].Invested and self.Portfolio[self.stock].Quantity < 0:
+            if price > (self.openingrange_HH + rangewidth):
+                self.Liquidate(tag="Short SL")
+                
+            if price < (self.openingrange_HH - (MULTIPLIER * rangewidth)):
+                self.Liquidate(tag="Short TP")
+                
