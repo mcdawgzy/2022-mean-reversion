@@ -21,7 +21,7 @@ class MeanReversion(QCAlgorithm):
         self.openingrange_HH = 0
         self.openingrange_LL = 0
         self.tradeLimit = True
-        self.Schedule.On(self.DateRules.EveryDay(self.stock), self.TimeRules.AfterMarketOpen(self.stock, PERIOD), self.DailyCheck)
+        self.Schedule.On(self.DateRules.EveryDay(self.stock), self.TimeRules.AfterMarketOpen(self.stock, PERIOD+1), self.DailyCheck)
 
         self.Schedule.On(self.DateRules.EveryDay(self.stock), self.TimeRules.BeforeMarketClose(self.stock, 5), self.Liquidate)
 
