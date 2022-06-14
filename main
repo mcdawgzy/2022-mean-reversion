@@ -5,69 +5,66 @@ from AlgorithmImports import *
 # Mean Reversion
 
 # ------------------------------------------------------------
-STOCK = "SPY"; PERIOD = 5; WAIT = 0; MULTIPLIER = 1
+SYMBOL = "AUDNZD"
 # ------------------------------------------------------------
 
 class MeanReversion(QCAlgorithm):
 
     def Initialize(self):
-        self.SetStartDate(2022, 6, 1)  
-        self.SetEndDate(2022, 6, 3)  
-        self.SetCash(100000) 
-        self.stock = self.AddEquity(STOCK, Resolution.Minute).Symbol
-        self.hh = self.MAX(self.stock, PERIOD, Resolution.Minute, Field.High)
-        self.ll = self.MIN(self.stock, PERIOD, Resolution.Minute, Field.Low)
-        self.SetWarmUp(PERIOD, Resolution.Minute)
-        self.openingrange_HH = 0
-        self.openingrange_LL = 0
-        self.tradeLimit = True
-        self.Schedule.On(self.DateRules.EveryDay(self.stock), self.TimeRules.AfterMarketOpen(self.stock, PERIOD+1), self.DailyCheck)
+        # Set dates
+        self.SetStartDate(2004,5,1)
+        self.SetEndDate(2022,5,31)
 
-        self.Schedule.On(self.DateRules.EveryDay(self.stock), self.TimeRules.BeforeMarketClose(self.stock, 5), self.Liquidate)
+        # Set cash
+        self.SetCash(100000)
 
-    def DailyCheck(self):
-        if self.IsWarmingUp: return
-    
-        self.openingrange_HH = self.hh.Current.Value
-        self.openingrange_LL = self.ll.Current.Value
+        # Add asset
+        self.symbol = self.AddForex(SYMBOL, Resolution.Daily).Symbol
+
+        # Trade limiter - one per day
         self.tradeLimit = True
-    
+
+        # Add bollinger band
+        self.Bolband = self.BB(SYMBOL, 20, 2, MovingAverageType.Simple, Resolution.Daily)
+
+        # Add RSI
+        self.rsi = self.RSI(SYMBOL, 13)
+
+        # Set warmup period
+        self.SetWarmUp(20)
+
     def OnData(self, data):
         if self.IsWarmingUp: return
-        if (self.openingrange_HH == 0 or self.openingrange_LL == 0): return
-    
-        price = self.Securities[self.stock].Price
-        risk = self.Portfolio.TotalPortfolioValue / 10000
-        rangewidth = self.openingrange_HH - self.openingrange_LL
-        shareqty = Math.Round(risk / rangewidth)
+        
+        # Risk parameters
+        price = self.Securities[SYMBOL].Close
+        risk = self.Portfolio.TotalPortfolioValue / 100
+        bbwidth = self.Bolband.UpperBand.Current.Value - self.Bolband.MiddleBand.Current.Value
+        holdings = self.Portfolio[SYMBOL].Quantity
 
-        if not self.Portfolio[self.stock].Invested and self.tradeLimit == True:
-            if price > self.openingrange_HH:
-                self.MarketOrder(STOCK, -shareqty, tag="Short entry")
-                self.Debug("Price: " + str(price) + " // High: " + str(self.openingrange_HH) + " // Low: " + str(self.openingrange_LL) + " // Width: " + str(rangewidth))
-                self.Debug("Short SL: " + str(self.openingrange_HH + rangewidth))
-                self.Debug("Short TP: " + str(self.openingrange_HH - (MULTIPLIER * rangewidth)))
-                self.tradeLimit = False
-                
-            if price < self.openingrange_LL:
-                self.MarketOrder(STOCK, shareqty, tag="Long entry")
-                self.Debug("Price: " + str(price) + " // High: " + str(self.openingrange_HH) + " // Low: " + str(self.openingrange_LL) + " // Width: " + str(rangewidth))
-                self.Debug("Long SL: " + str(self.openingrange_LL - rangewidth))
-                self.Debug("Long TP: " + str(self.openingrange_LL + (MULTIPLIER * rangewidth)))
-                self.tradeLimit = False
+        if bbwidth == 0:
+            return
+        shareqty = Math.Round(risk / bbwidth)
 
-        if self.Portfolio[self.stock].Invested and self.Portfolio[self.stock].Quantity > 0:
-            if price < (self.openingrange_LL - rangewidth):
-                self.Liquidate(tag = "Long SL")
-                
-            if price > (self.openingrange_LL + (MULTIPLIER * rangewidth)):
-                self.Liquidate(tag = "Long TP")
-                
+        if self.IsWarmingUp:
+            return
 
-        if self.Portfolio[self.stock].Invested and self.Portfolio[self.stock].Quantity < 0:
-            if price > (self.openingrange_HH + rangewidth):
-                self.Liquidate(tag="Short SL")
+    # Buy if price closes below lower band
+        if holdings == 0:
+            if price < self.Bolband.LowerBand.Current.Value and self.rsi.Current.Value < 30:
+                self.MarketOrder(SYMBOL, shareqty, tag="long entry")
                 
-            if price < (self.openingrange_HH - (MULTIPLIER * rangewidth)):
-                self.Liquidate(tag="Short TP")
-                
+        # Sell if price closes above the upper band
+        if holdings == 0:
+            if price > self.Bolband.UpperBand.Current.Value and self.rsi.Current.Value > 70:
+                self.MarketOrder(SYMBOL, -shareqty, tag="short entry")
+
+        # Long trade exit
+        if holdings > 0:
+            if self.rsi.Current.Value > 65:
+                self.Liquidate(tag="long exit")
+
+        # Short trade exit
+        if holdings < 0:
+            if self.rsi.Current.Value < 35:
+                self.Liquidate(tag="short exit")
